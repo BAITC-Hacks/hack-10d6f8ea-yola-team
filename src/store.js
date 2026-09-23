@@ -51,23 +51,17 @@ export function normalizeStoreData(value) {
   const tasks = tasksSource.map(normalizeTask).filter(Boolean);
   const taskIds = new Set(tasks.map((task) => task.id));
   const teams = teamsSource
-    .filter((team) => isRecord(team) && typeof team.id === 'string' && typeof team.name === 'string')
+    .filter((team) => isRecord(team) && typeof team.id === 'string' && team.id !== 'profile-student' && typeof team.name === 'string')
     .map((team) => ({ ...team }));
   const teamIds = new Set(teams.map((team) => team.id));
   const proposalsSource = Array.isArray(source.proposals) ? source.proposals : seedData.proposals;
   const proposals = proposalsSource
     .filter((proposal) => isRecord(proposal) && typeof proposal.id === 'string' && taskIds.has(proposal.taskId) && teamIds.has(proposal.teamId))
     .map((proposal) => ({ ...proposal, status: proposalStatuses.has(proposal.status) ? proposal.status : PROPOSAL_STATUS.PENDING }));
-  const profiles = isRecord(source.profiles) ? source.profiles : {};
   return {
     tasks,
     teams,
     proposals,
-    profiles: {
-      business: isRecord(profiles.business) ? profiles.business : null,
-      student: isRecord(profiles.student) ? profiles.student : null,
-    },
-    currentRole: source.currentRole === 'business' || source.currentRole === 'student' ? source.currentRole : null,
     workflow: normalizeWorkflow(source.workflow),
   };
 }

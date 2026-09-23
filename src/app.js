@@ -8,7 +8,8 @@ import { loadStore, resetStore, saveStore } from './store.js';
 let store = loadStore();
 let draft = store.workflow?.draft ? { ...store.workflow.draft } : emptyTask('draft-current');
 let analysis = store.workflow?.analysis ? structuredClone(store.workflow.analysis) : null;
-let role = store.currentRole || 'business';
+let auth = { status: 'loading', user: null };
+let authError = '';
 let aiState = 'idle';
 let aiError = '';
 let flashMessage = '';
@@ -17,12 +18,16 @@ let persistenceError = '';
 
 const app = document.querySelector('#app');
 const route = () => window.location.hash.replace(/^#\/?/, '') || 'home';
+const routePath = () => route().split('?')[0];
+const routeQuery = () => new URLSearchParams(route().split('?')[1] || '');
 const navigate = (path) => { window.location.hash = `#/${path}`; };
 const esc = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
 const scoreClass = (score) => score >= 90 ? 'priority' : score >= 70 ? 'ready' : score >= 40 ? 'working' : 'draft';
 const taskById = (id) => store.tasks.find((task) => task.id === id);
 const teamById = (id) => store.teams.find((team) => team.id === id);
-const activeStudentTeam = () => store.teams.find((team) => team.id === 'profile-student') || store.teams[0];
+const userRole = () => auth.user?.role || null;
+const userProfile = () => auth.user?.profile || null;
+const activeStudentTeam = () => auth.user?.role === 'student' ? store.teams.find((team) => team.id === `user-${auth.user.id}`) || null : null;
 const currentDraftCard = () => ({ ...draft, ...(analysis?.suggestedCard || {}) });
 function persistStore() {
   const saved = saveStore(store);
@@ -46,25 +51,69 @@ function saveCardChange(card) {
 }
 async function requestAI(payload) { const response = await fetch('/api/ai/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) throw new Error(`AI endpoint ${response.status}`); return response.json(); }
 
+async function requestJson(path, options = {}) {
+  const response = await fetch(path, { credentials: 'same-origin', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) { const error = new Error(body.error || 'Запрос не выполнен.'); error.status = response.status; throw error; }
+  return body;
+}
+
+function syncDerivedStudentTeam(user) {
+  if (user?.role !== 'student' || !user.profile?.name) return;
+  const team = { id: `user-${user.id}`, name: user.profile.team || user.profile.name, interests: user.profile.interests, skills: user.profile.skills, technologies: user.profile.technologies, portfolio: user.profile.portfolio };
+  const teams = [team, ...store.teams.filter((item) => item.id !== team.id && item.id !== 'profile-student')];
+  if (JSON.stringify(teams) !== JSON.stringify(store.teams)) { store.teams = teams; persistStore(); }
+}
+
+function setAuthUser(user) {
+  auth = { status: 'ready', user: user || null };
+  if (user) syncDerivedStudentTeam(user);
+}
+
+async function loadAuth() {
+  try { setAuthUser((await requestJson('/api/auth/me')).user); }
+  catch { auth = { status: 'ready', user: null }; authError = 'Не удалось проверить сессию. Попробуйте обновить страницу.'; }
+  render();
+}
+
 function header() {
-  return `<header class="topbar"><a class="brand" href="#/home"><span class="brand-mark">S</span><span>Sana <em>Hub</em></span></a><nav><a class="${route() === 'home' ? 'active' : ''}" href="#/home">Главная</a>${role === 'business' ? `<a class="${route() === 'business/dashboard' ? 'active' : ''}" href="#/business/dashboard">Дашборд</a><a class="${route() === 'business/intake' || route() === 'business/card' ? 'active' : ''}" href="#/business/intake">Создать задачу</a><a class="${route() === 'business/proposals' ? 'active' : ''}" href="#/business/proposals">Предложения <span class="nav-count">${store.proposals.filter((p) => p.status === 'pending').length}</span></a>` : `<a class="${route() === 'catalog' || route().startsWith('task/') ? 'active' : ''}" href="#/catalog">Каталог задач</a>`}<a class="${route() === 'profile' ? 'active' : ''}" href="#/profile">Профиль</a></nav><div class="role-switch"><span>Сменить роль</span><button class="${role === 'business' ? 'selected' : ''}" data-role="business">Бизнес</button><button class="${role === 'student' ? 'selected' : ''}" data-role="student">Студент</button></div></header>`;
+  const current = routePath();
+  const role = userRole();
+  const roleLinks = role === 'business'
+    ? `<a class="${current === 'business/dashboard' ? 'active' : ''}" href="#/business/dashboard">Дашборд</a><a class="${current === 'business/intake' || current === 'business/card' ? 'active' : ''}" href="#/business/intake">Создать задачу</a><a class="${current === 'business/proposals' ? 'active' : ''}" href="#/business/proposals">Предложения <span class="nav-count">${store.proposals.filter((p) => p.status === 'pending').length}</span></a>`
+    : `<a class="${current === 'catalog' || current.startsWith('task/') ? 'active' : ''}" href="#/catalog">Каталог задач</a>`;
+  const account = auth.user
+    ? `<a class="account-link ${current === 'profile' ? 'active' : ''}" href="#/profile">${esc(auth.user.profile?.name || 'Профиль')}</a>`
+    : `<div class="auth-actions"><a class="secondary compact" href="#/register">Регистрация</a><a class="primary compact" href="#/login">Вход</a></div>`;
+  return `<header class="topbar"><a class="brand" href="#/home"><span class="brand-mark">S</span><span>Sana <em>Hub</em></span></a><nav><a class="${current === 'home' ? 'active' : ''}" href="#/home">Главная</a>${roleLinks}</nav>${account}</header>`;
 }
 function page(title, subtitle, content) { return `${header()}<main class="page"><div class="page-heading"><p class="eyebrow">AI SANA CHALLENGE HUB</p><h1>${title}</h1><p class="muted">${subtitle}</p></div>${content}</main>`; }
 function scoreBadge(task) { return `<span class="score-badge ${scoreClass(task.score)}"><strong>${task.score}</strong>/100 · ${levelLabel[task.readinessLevel]}</span>`; }
 
 function renderHome() {
-  return `${header()}<main class="landing"><section class="landing-hero"><p class="eyebrow">AI SANA CHALLENGE HUB</p><h1>От бизнес-задачи<br><span>к реальному решению</span></h1><p class="landing-copy">Бизнес формулирует задачу. AI помогает уточнить её. Студенты и фрилансеры находят реальные задачи и предлагают решения.</p><div class="landing-actions"><a class="primary" href="#/onboarding/business">Я представитель бизнеса →</a><a class="secondary" href="#/onboarding/student">Я студент / фрилансер</a></div></section><section class="flow-strip">${['Опишите задачу', 'Уточните её с AI', 'Получите рейтинг', 'Опубликуйте', 'Получите предложения'].map((text, index) => `<div><span>${index + 1}</span><strong>${text}</strong></div>`).join('')}</section></main>`;
+  const businessHref = auth.user ? (userRole() === 'business' ? '#/business/dashboard' : '#/catalog') : '#/register?role=business';
+  const studentHref = auth.user ? (userRole() === 'student' ? '#/catalog' : '#/business/dashboard') : '#/register?role=student';
+  return `${header()}<main class="landing"><section class="landing-hero"><p class="eyebrow">AI SANA CHALLENGE HUB</p><h1>От бизнес-задачи<br><span>к реальному решению</span></h1><p class="landing-copy">Бизнес формулирует задачу. AI помогает уточнить её. Студенты и фрилансеры находят реальные задачи и предлагают решения.</p><div class="landing-actions"><a class="primary" href="${businessHref}">Я представитель бизнеса →</a><a class="secondary" href="${studentHref}">Я студент / фрилансер</a></div></section><section class="flow-strip">${['Опишите задачу', 'Уточните её с AI', 'Получите рейтинг', 'Опубликуйте', 'Получите предложения'].map((text, index) => `<div><span>${index + 1}</span><strong>${text}</strong></div>`).join('')}</section></main>`;
+}
+
+function renderRegister() {
+  const selectedRole = routeQuery().get('role') === 'student' ? 'student' : 'business';
+  return page('Создать аккаунт', 'Регистрация хранит аккаунт, роль, профиль и сессию только на сервере.', `<div class="auth-layout"><form id="register-form" class="panel auth-form"><label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label><label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="new-password" minlength="8" required placeholder="Минимум 8 символов" /></label><label class="field"><span>Подтверждение пароля</span><input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required /></label><fieldset class="role-choice"><legend>Роль</legend><label><input type="radio" name="role" value="business" ${selectedRole === 'business' ? 'checked' : ''} /> Business</label><label><input type="radio" name="role" value="student" ${selectedRole === 'student' ? 'checked' : ''} /> Student</label></fieldset><div id="auth-error" class="error-box" ${authError ? '' : 'hidden'}>${esc(authError)}</div><button class="primary full" type="submit">Зарегистрироваться →</button><p class="auth-foot">Уже есть аккаунт? <a href="#/login">Войти</a></p></form></div>`);
+}
+
+function renderLogin() {
+  return page('Вход в Sana Hub', 'Используйте email и пароль, указанные при регистрации.', `<div class="auth-layout"><form id="login-form" class="panel auth-form"><label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label><label class="field"><span>Пароль</span><input name="password" type="password" autocomplete="current-password" required /></label><div id="auth-error" class="error-box" ${authError ? '' : 'hidden'}>${esc(authError)}</div><button class="primary full" type="submit">Войти →</button><p class="auth-foot">Нет аккаунта? <a href="#/register">Зарегистрироваться</a></p></form></div>`);
 }
 
 function renderOnboarding(type) {
   const isBusiness = type === 'business';
-  const profile = store.profiles?.[type] || {};
+  const profile = userProfile() || {};
   const fields = isBusiness ? [['name', 'Имя', 'Айдар', true], ['company', 'Название компании', 'Astana Coffee', true], ['industry', 'Отрасль', 'HoReCa', true], ['contact', 'Контакт / email', 'aidar@example.com', true], ['interactionFormat', 'Формат взаимодействия', 'Онлайн-встречи и Telegram', true]] : [['name', 'Имя', 'Батыр', true], ['team', 'Название команды', 'YOLO Team', false], ['skills', 'Навыки', 'Python, Web, AI', true], ['technologies', 'Технологии', 'React, FastAPI, Python', true], ['interests', 'Интересы / направления', 'AI, аналитика, автоматизация', true], ['portfolio', 'GitHub или портфолио', 'https://github.com/example', false]];
-  return page(isBusiness ? 'Профиль представителя бизнеса' : 'Профиль студента / фрилансера', isBusiness ? 'Расскажите о компании — эти данные помогут студентам понимать контекст и связываться с вами.' : 'Можно работать самостоятельно или указать команду. Профиль будет доступен при отправке предложений.', `<div class="onboarding-layout"><form id="onboarding-form" data-profile-type="${type}" class="panel onboarding-form"><div class="panel-tag">Простой onboarding · без пароля</div><div class="profile-form-grid">${fields.map(([name, label, placeholder, required]) => `<label class="field"><span>${label}${required ? ' *' : ''}</span>${name === 'interactionFormat' || name === 'skills' || name === 'technologies' || name === 'interests' ? `<textarea name="${name}" rows="3" ${required ? 'required' : ''} placeholder="${placeholder}">${esc(profile[name] || '')}</textarea>` : `<input name="${name}" value="${esc(profile[name] || '')}" ${required ? 'required' : ''} placeholder="${placeholder}" ${name === 'contact' ? 'type="email"' : name === 'portfolio' ? 'type="url"' : ''} />`}</label>`).join('')}</div><div id="onboarding-error" class="error-box" hidden>Заполните обязательные поля.</div><button class="primary full" type="submit">Сохранить профиль и продолжить →</button></form><aside class="panel onboarding-note"><div class="spark">✦</div><h2>Только данные для MVP</h2><p class="muted">Без регистрации, паролей и сложных ролей. Профиль сохраняется локально в браузере и остаётся после обновления страницы.</p><a class="text-link" href="#/home">← Вернуться на главную</a></aside></div>`);
+  return page(isBusiness ? 'Профиль представителя бизнеса' : 'Профиль студента / фрилансера', isBusiness ? 'Расскажите о компании — эти данные помогут студентам понимать контекст и связываться с вами.' : 'Можно работать самостоятельно или указать команду. Профиль будет доступен при отправке предложений.', `<div class="onboarding-layout"><form id="onboarding-form" data-profile-type="${type}" class="panel onboarding-form"><div class="panel-tag">Защищённый серверный профиль</div><div class="profile-form-grid">${fields.map(([name, label, placeholder, required]) => `<label class="field"><span>${label}${required ? ' *' : ''}</span>${name === 'interactionFormat' || name === 'skills' || name === 'technologies' || name === 'interests' ? `<textarea name="${name}" rows="3" ${required ? 'required' : ''} placeholder="${placeholder}">${esc(profile[name] || '')}</textarea>` : `<input name="${name}" value="${esc(profile[name] || '')}" ${required ? 'required' : ''} placeholder="${placeholder}" ${name === 'contact' ? 'type="email"' : name === 'portfolio' ? 'type="url"' : ''} />`}</label>`).join('')}</div><div id="onboarding-error" class="error-box" hidden></div><button class="primary full" type="submit">Сохранить профиль и продолжить →</button></form><aside class="panel onboarding-note"><div class="spark">✦</div><h2>Профиль на сервере</h2><p class="muted">Данные профиля сохраняются в SQLite и привязаны к текущей защищённой сессии. Пароль никогда не отправляется обратно в браузер.</p><a class="text-link" href="#/profile">← Вернуться в профиль</a></aside></div>`);
 }
 
 function renderBusinessDashboard() {
-  const profile = store.profiles?.business;
+  const profile = userProfile();
   if (!profile) return renderOnboarding('business');
   const tasks = store.tasks.filter((task) => task.status === TASK_STATUS.PUBLISHED);
   const recent = tasks.slice(0, 3);
@@ -72,10 +121,11 @@ function renderBusinessDashboard() {
 }
 
 function renderProfile() {
-  const profile = store.profiles?.[role];
-  if (!profile) return renderOnboarding(role);
+  const role = userRole();
+  const profile = userProfile();
+  if (!profile) return page('Профиль', 'Завершите настройку аккаунта.', `<section class="panel empty-state"><h2>Профиль ещё не заполнен</h2><p class="muted">Добавьте данные, необходимые для работы в Sana Hub.</p><a class="primary" href="#/onboarding/${role}">Заполнить профиль →</a><button class="secondary logout-button" data-action="logout">Выйти</button></section>`);
   const entries = role === 'business' ? [['Имя', profile.name], ['Компания', profile.company], ['Отрасль', profile.industry], ['Контакт', profile.contact], ['Формат взаимодействия', profile.interactionFormat]] : [['Имя', profile.name], ['Команда', profile.team || 'Фрилансер'], ['Навыки', profile.skills], ['Технологии', profile.technologies], ['Интересы', profile.interests], ['GitHub / портфолио', profile.portfolio || 'Не указано']];
-  return page('Профиль', role === 'business' ? 'Данные представителя бизнеса' : 'Данные студента / фрилансера', `<section class="panel profile-card"><div class="profile-avatar">${esc(profile.name?.[0] || '?')}</div><div><p class="panel-tag">${role === 'business' ? 'Business profile' : 'Student profile'}</p><h2>${esc(profile.name)}</h2><div class="profile-details">${entries.map(([label, value]) => `<div><span>${label}</span><p>${esc(value)}</p></div>`).join('')}</div><a class="secondary" href="#/onboarding/${role}">Редактировать профиль</a></div></section>`);
+  return page('Профиль', role === 'business' ? 'Данные представителя бизнеса' : 'Данные студента / фрилансера', `<section class="panel profile-card"><div class="profile-avatar">${esc(profile.name?.[0] || '?')}</div><div><p class="panel-tag">${role === 'business' ? 'Business profile' : 'Student profile'}</p><h2>${esc(profile.name)}</h2><p class="muted">${esc(auth.user.email)}</p><div class="profile-details">${entries.map(([label, value]) => `<div><span>${label}</span><p>${esc(value)}</p></div>`).join('')}</div><div class="profile-actions"><a class="secondary" href="#/onboarding/${role}">Редактировать профиль</a><button class="secondary danger" data-action="logout">Выйти</button></div></div></section>`);
 }
 
 function renderIntake() {
@@ -126,7 +176,9 @@ function renderCatalog() {
 }
 
 function renderProposalForm(task) {
-  if (role !== 'student') return `<section class="panel proposal-panel business-proposal-note"><p class="panel-tag">Отклик команды</p><h2>Предложения отправляют студенты и фрилансеры</h2><p class="muted">Переключитесь в роль «Студент», чтобы предложить решение. Бизнес принимает или отклоняет отклики только вручную.</p></section>`;
+  const role = userRole();
+  if (!auth.user) return `<section class="panel proposal-panel business-proposal-note"><p class="panel-tag">Отклик команды</p><h2>Войдите как студент или фрилансер</h2><p class="muted">Для отправки предложения требуется серверный аккаунт с ролью Student.</p><div class="inline-actions"><a class="primary" href="#/login">Войти</a><a class="secondary" href="#/register?role=student">Регистрация</a></div></section>`;
+  if (role !== 'student') return `<section class="panel proposal-panel business-proposal-note"><p class="panel-tag">Отклик команды</p><h2>Предложения отправляют студенты и фрилансеры</h2><p class="muted">Текущий аккаунт зарегистрирован как Business. Выбор команды бизнес выполняет вручную.</p></section>`;
   const team = activeStudentTeam();
   if (!team) return `<section class="panel proposal-panel empty-state"><h2>Сначала заполните профиль</h2><p class="muted">Профиль автоматически подставляется в предложение.</p><a class="primary" href="#/onboarding/student">Заполнить профиль →</a></section>`;
   return `<section class="panel proposal-panel"><p class="panel-tag">Отклик команды</p><h2>Предложить решение</h2><div class="proposal-profile"><div class="profile-avatar">${esc(team.name?.[0] || '?')}</div><div><strong>${esc(team.name)}</strong><span>${esc(team.skills || 'Навыки не указаны')}</span><small>${esc(team.technologies || 'Технологии не указаны')}</small></div><span class="profile-prefill">Профиль подставлен</span></div><form id="proposal-form" data-task-id="${task.id}" novalidate><input type="hidden" name="teamId" value="${esc(team.id)}" /><label class="field"><span>Идея решения</span><textarea name="solutionIdea" required rows="3" placeholder="Какой подход предлагаете?"></textarea></label><label class="field"><span>План реализации</span><textarea name="plan" required rows="3" placeholder="Опишите основные этапы"></textarea></label><div class="form-grid three"><label class="field"><span>Ожидаемый срок</span><input name="duration" required placeholder="2 недели" /></label><label class="field wide"><span>Ссылка на прототип</span><input name="prototypeUrl" type="url" required placeholder="https://example.com/demo" /></label></div><div id="proposal-error" class="error-box" hidden></div><button class="primary" type="submit">Отправить предложение →</button></form></section>`;
@@ -137,7 +189,10 @@ function renderTask(id) {
   if (!task) return page('Задача не найдена', '', `<div class="panel empty-state"><h2>Такой задачи нет</h2><a class="text-link" href="#/catalog">Вернуться в каталог →</a></div>`);
   const proposals = store.proposals.filter((proposal) => proposal.taskId === id);
   const company = task.company || 'Компания не указана';
-  return page(task.title, `${esc(company)}${task.industry ? ` · ${esc(task.industry)}` : ''} · ${esc(task.topic)}`, `<div class="task-detail-layout"><section><a class="back-link" href="#/catalog">← Назад в каталог</a><div class="panel detail-panel"><div class="task-top"><span class="topic">${esc(task.topic)}</span>${scoreBadge(task)}</div><div class="company-heading"><span>Заказчик</span><strong>${esc(company)}</strong></div><p class="lead">${esc(task.need || 'Требуется уточнение')}</p><div class="detail-fields">${[['context','Контекст'], ['need','Потребность'], ['users','Для кого'], ['data','Данные и материалы'], ['constraints','Ограничения'], ['expectedResult','Ожидаемый результат'], ['successCriteria','Критерии успеха'], ['businessContact','Контакт бизнеса'], ['interactionFormat','Формат взаимодействия']].map(([key, label]) => `<div><span>${label}</span><p>${esc(task[key] || 'Требуется уточнение')}</p></div>`).join('')}</div></div>${renderProposalForm(task)}</section><aside class="panel side-summary"><p class="panel-tag">Готовность задачи</p><div class="big-score ${scoreClass(task.score)}"><strong>${task.score}</strong><span>/100</span></div><span class="level-pill ${scoreClass(task.score)}">${levelLabel[task.readinessLevel]}</span><div class="proposal-count"><strong>${proposals.length}</strong><span>предложений уже отправлено</span></div>${renderLastCardChange(task.lastChange)}<p class="tiny">Рейтинг не ограничивает доступ. Решение о выборе одной, нескольких или ни одной команды всегда принимает бизнес.</p>${role === 'business' ? `<button class="secondary full" data-action="edit-task" data-task-id="${task.id}">Редактировать и пересчитать</button>` : '<button class="primary full" data-action="focus-proposal">Предложить решение</button>'}</aside></div>`);
+  const sideAction = userRole() === 'business'
+    ? `<button class="secondary full" data-action="edit-task" data-task-id="${task.id}">Редактировать и пересчитать</button>`
+    : auth.user ? '<button class="primary full" data-action="focus-proposal">Предложить решение</button>' : '<a class="primary full" href="#/login">Войти, чтобы предложить</a>';
+  return page(task.title, `${esc(company)}${task.industry ? ` · ${esc(task.industry)}` : ''} · ${esc(task.topic)}`, `<div class="task-detail-layout"><section><a class="back-link" href="#/catalog">← Назад в каталог</a><div class="panel detail-panel"><div class="task-top"><span class="topic">${esc(task.topic)}</span>${scoreBadge(task)}</div><div class="company-heading"><span>Заказчик</span><strong>${esc(company)}</strong></div><p class="lead">${esc(task.need || 'Требуется уточнение')}</p><div class="detail-fields">${[['context','Контекст'], ['need','Потребность'], ['users','Для кого'], ['data','Данные и материалы'], ['constraints','Ограничения'], ['expectedResult','Ожидаемый результат'], ['successCriteria','Критерии успеха'], ['businessContact','Контакт бизнеса'], ['interactionFormat','Формат взаимодействия']].map(([key, label]) => `<div><span>${label}</span><p>${esc(task[key] || 'Требуется уточнение')}</p></div>`).join('')}</div></div>${renderProposalForm(task)}</section><aside class="panel side-summary"><p class="panel-tag">Готовность задачи</p><div class="big-score ${scoreClass(task.score)}"><strong>${task.score}</strong><span>/100</span></div><span class="level-pill ${scoreClass(task.score)}">${levelLabel[task.readinessLevel]}</span><div class="proposal-count"><strong>${proposals.length}</strong><span>предложений уже отправлено</span></div>${renderLastCardChange(task.lastChange)}<p class="tiny">Рейтинг не ограничивает доступ. Решение о выборе одной, нескольких или ни одной команды всегда принимает бизнес.</p>${sideAction}</aside></div>`);
 }
 
 function renderProposals() {
@@ -149,17 +204,97 @@ function renderProposals() {
   return page('Предложения команд', 'Сравните идеи и примите решение вручную. Sana не назначает команды автоматически.', `<div class="proposal-list">${rows || '<div class="panel empty-state"><div class="spark">✦</div><h2>Предложений пока нет</h2><p class="muted">Когда студенты или фрилансеры откликнутся на опубликованную задачу, предложения появятся здесь.</p><a class="text-link" href="#/catalog">Открыть каталог →</a></div>'}</div>`);
 }
 
-function render() { const current = route(); if (current === 'home') app.innerHTML = renderHome(); else if (current.startsWith('onboarding/')) app.innerHTML = renderOnboarding(current.split('/')[1] === 'business' ? 'business' : 'student'); else if (current === 'business/dashboard') app.innerHTML = renderBusinessDashboard(); else if (current === 'profile') app.innerHTML = renderProfile(); else if (current === 'catalog') app.innerHTML = renderCatalog(); else if (current.startsWith('task/')) app.innerHTML = renderTask(current.split('/')[1]); else if (current === 'business/card') app.innerHTML = renderCard(); else if (current === 'business/proposals') app.innerHTML = renderProposals(); else app.innerHTML = renderIntake(); if (persistenceError) app.querySelector('main')?.insertAdjacentHTML('afterbegin', `<div class="error-box global-error">${esc(persistenceError)}</div>`); if (flashMessage) { app.querySelector('main')?.insertAdjacentHTML('afterbegin', `<div class="success-box">✓ ${esc(flashMessage)}</div>`); flashMessage = ''; } bindEvents(); }
+function renderLoading(message = 'Проверяем защищённую сессию…') {
+  app.innerHTML = `<main class="auth-loading"><div class="loading-orb">✦</div><h1>Sana Hub</h1><p class="muted">${esc(message)}</p></main>`;
+}
+
+function redirectTo(path) {
+  renderLoading('Перенаправляем…');
+  queueMicrotask(() => navigate(path));
+}
+
+function render() {
+  if (auth.status === 'loading') { renderLoading(); return; }
+  const current = routePath();
+  const protectedRoute = current === 'profile' || current.startsWith('onboarding/') || current.startsWith('business/');
+  if (!auth.user && protectedRoute) {
+    const selectedRole = current.startsWith('onboarding/student') ? '?role=student' : current.startsWith('onboarding/business') ? '?role=business' : '';
+    redirectTo(selectedRole ? `register${selectedRole}` : 'login');
+    return;
+  }
+  if (auth.user && (current === 'login' || current === 'register')) {
+    redirectTo(userRole() === 'business' ? 'business/dashboard' : 'catalog');
+    return;
+  }
+  if (current.startsWith('business/') && userRole() !== 'business') { redirectTo('catalog'); return; }
+  if (current.startsWith('onboarding/') && current !== `onboarding/${userRole()}`) { redirectTo(`onboarding/${userRole()}`); return; }
+
+  if (current === 'home') app.innerHTML = renderHome();
+  else if (current === 'register') app.innerHTML = renderRegister();
+  else if (current === 'login') app.innerHTML = renderLogin();
+  else if (current.startsWith('onboarding/')) app.innerHTML = renderOnboarding(userRole());
+  else if (current === 'business/dashboard') app.innerHTML = renderBusinessDashboard();
+  else if (current === 'profile') app.innerHTML = renderProfile();
+  else if (current === 'catalog') app.innerHTML = renderCatalog();
+  else if (current.startsWith('task/')) app.innerHTML = renderTask(current.split('/')[1]);
+  else if (current === 'business/intake') app.innerHTML = renderIntake();
+  else if (current === 'business/card') app.innerHTML = renderCard();
+  else if (current === 'business/proposals') app.innerHTML = renderProposals();
+  else app.innerHTML = renderHome();
+  if (persistenceError) app.querySelector('main')?.insertAdjacentHTML('afterbegin', `<div class="error-box global-error">${esc(persistenceError)}</div>`);
+  if (flashMessage) { app.querySelector('main')?.insertAdjacentHTML('afterbegin', `<div class="success-box">✓ ${esc(flashMessage)}</div>`); flashMessage = ''; }
+  bindEvents();
+}
 function bindEvents() {
-  document.querySelectorAll('[data-role]').forEach((button) => button.addEventListener('click', () => {
-    role = button.dataset.role;
-    store.currentRole = role;
-    persistStore();
-    navigate(store.profiles?.[role] ? (role === 'business' ? 'business/dashboard' : 'catalog') : `onboarding/${role}`);
+  document.querySelector('#register-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const errorBox = document.querySelector('#auth-error');
+    const password = String(values.get('password') || '');
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+    if (password !== String(values.get('confirmPassword') || '')) { errorBox.textContent = 'Пароли не совпадают.'; errorBox.hidden = false; return; }
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const body = await requestJson('/api/auth/register', { method: 'POST', body: JSON.stringify({ email: values.get('email'), password, role: values.get('role') }) });
+      authError = '';
+      setAuthUser(body.user);
+      navigate(`onboarding/${body.user.role}`);
+    } catch (error) {
+      errorBox.textContent = error.message;
+      errorBox.hidden = false;
+      button.disabled = false;
+    }
+  });
+  document.querySelector('#login-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+    const values = new FormData(form);
+    const errorBox = document.querySelector('#auth-error');
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const body = await requestJson('/api/auth/login', { method: 'POST', body: JSON.stringify({ email: values.get('email'), password: values.get('password') }) });
+      authError = '';
+      setAuthUser(body.user);
+      navigate(body.user.role === 'business' ? 'business/dashboard' : 'catalog');
+    } catch (error) {
+      errorBox.textContent = error.message;
+      errorBox.hidden = false;
+      button.disabled = false;
+    }
+  });
+  document.querySelectorAll('[data-action="logout"]').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await requestJson('/api/auth/logout', { method: 'POST', body: '{}' }); } catch { /* Expired sessions are cleared client-side too. */ }
+    setAuthUser(null);
+    navigate('home');
   }));
   document.querySelectorAll('a[href="#/business/intake"]').forEach((link) => link.addEventListener('click', () => {
-    if (route() !== 'business/dashboard') return;
-    const profile = store.profiles?.business;
+    if (routePath() !== 'business/dashboard') return;
+    const profile = userProfile();
     draft = emptyTask('draft-current');
     if (profile) {
       draft.businessContact = `${profile.name}, ${profile.contact}`;
@@ -173,27 +308,32 @@ function bindEvents() {
     lastSavedCard = null;
     persistWorkflow();
   }));
-  document.querySelector('#onboarding-form')?.addEventListener('submit', (event) => {
+  document.querySelector('#onboarding-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const type = event.currentTarget.dataset.profileType;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const type = userRole();
     const profile = Object.fromEntries([...form.entries()].map(([key, value]) => [key, String(value).trim()]));
-    if (!event.currentTarget.checkValidity()) { document.querySelector('#onboarding-error').hidden = false; return; }
-    store.profiles ||= { business: null, student: null };
-    store.profiles[type] = profile;
-    store.currentRole = type;
-    role = type;
-    if (type === 'student') {
-      const team = { id: 'profile-student', name: profile.team || profile.name, interests: profile.interests, skills: profile.skills, technologies: profile.technologies, portfolio: profile.portfolio };
-      store.teams = [team, ...store.teams.filter((item) => item.id !== team.id)];
-    } else {
-      draft.businessContact ||= `${profile.name}, ${profile.contact}`;
-      draft.interactionFormat ||= profile.interactionFormat;
-      draft.company ||= profile.company;
-      draft.industry ||= profile.industry;
+    const errorBox = document.querySelector('#onboarding-error');
+    if (!formElement.checkValidity()) { formElement.reportValidity(); return; }
+    const button = formElement.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      const body = await requestJson('/api/auth/profile', { method: 'PUT', body: JSON.stringify(profile) });
+      setAuthUser(body.user);
+      if (type === 'business') {
+        draft.businessContact ||= `${profile.name}, ${profile.contact}`;
+        draft.interactionFormat ||= profile.interactionFormat;
+        draft.company ||= profile.company;
+        draft.industry ||= profile.industry;
+      }
+      flashMessage = 'Профиль сохранён на сервере.';
+      navigate(type === 'business' ? 'business/dashboard' : 'catalog');
+    } catch (error) {
+      errorBox.textContent = error.message;
+      errorBox.hidden = false;
+      button.disabled = false;
     }
-    if (!persistStore()) { render(); return; }
-    navigate(type === 'business' ? 'business/dashboard' : 'catalog');
   });
   document.querySelector('[data-action="analyze"]')?.addEventListener('click', async () => {
     if (aiState === 'loading') return;
@@ -305,6 +445,7 @@ function renderCardLive() { const existing = document.querySelector('[data-score
 function filterCatalog() { const topic = document.querySelector('#topic-filter')?.value || 'all'; const level = document.querySelector('#level-filter')?.value || 'all'; const query = document.querySelector('#catalog-search')?.value || ''; const tasks = selectCatalogTasks(store.tasks, { topic, level, query }); document.querySelector('#catalog-grid').innerHTML = catalogResults(tasks); const count = document.querySelector('#catalog-count'); if (count) count.textContent = `${tasks.length} задач`; }
 
 window.addEventListener('hashchange', render);
-window.addEventListener('storage', () => { store = loadStore(); role = store.currentRole || role; draft = store.workflow?.draft ? { ...store.workflow.draft } : draft; analysis = store.workflow?.analysis ? structuredClone(store.workflow.analysis) : analysis; lastSavedCard = store.workflow?.lastSavedCard ? { ...store.workflow.lastSavedCard } : lastSavedCard; render(); });
+window.addEventListener('storage', () => { store = loadStore(); draft = store.workflow?.draft ? { ...store.workflow.draft } : draft; analysis = store.workflow?.analysis ? structuredClone(store.workflow.analysis) : analysis; lastSavedCard = store.workflow?.lastSavedCard ? { ...store.workflow.lastSavedCard } : lastSavedCard; if (auth.user) syncDerivedStudentTeam(auth.user); render(); });
 window.resetSanaDemo = () => { store = resetStore(); analysis = null; draft = emptyTask('draft-current'); lastSavedCard = null; persistenceError = ''; render(); };
 render();
+void loadAuth();

@@ -7,7 +7,8 @@ test('invalid persisted root safely restores complete demo collections', () => {
   assert.ok(store.tasks.length >= 5);
   assert.ok(store.teams.length >= 5);
   assert.ok(store.proposals.length >= 5);
-  assert.deepEqual(store.profiles, { business: null, student: null });
+  assert.equal('profiles' in store, false);
+  assert.equal('currentRole' in store, false);
 });
 
 test('persisted tasks are normalized and stale score is recalculated', () => {
@@ -21,9 +22,8 @@ test('persisted tasks are normalized and stale score is recalculated', () => {
   assert.equal(store.tasks[0].score, 10);
   assert.equal(store.tasks[0].readinessLevel, 'Draft');
   assert.equal(store.proposals[0].status, 'pending');
-  assert.equal(store.profiles.business, null);
-  assert.equal(store.profiles.student.name, 'Батыр');
-  assert.equal(store.currentRole, null);
+  assert.equal('profiles' in store, false);
+  assert.equal('currentRole' in store, false);
 });
 
 test('orphan proposals and malformed entities are removed without a crash', () => {

@@ -2,64 +2,66 @@
 
 Рабочий MVP для трека HackAlem / AI Sana «от бизнес-задачи к решению».
 
-Бизнес часто описывает задачу слишком коротко, поэтому студенческим командам не хватает контекста, данных и критериев успеха. Sana Hub превращает такое описание в редактируемую карточку: AI находит пробелы и задаёт уточняющие вопросы, приложение прозрачно рассчитывает готовность, а бизнес вручную подтверждает и публикует задачу. Студенты находят её в общем каталоге, отправляют предложения, после чего бизнес самостоятельно принимает или отклоняет каждое из них.
+Sana Hub превращает короткое описание потребности бизнеса в редактируемую карточку задачи: AI находит пробелы и задаёт уточняющие вопросы, приложение прозрачно рассчитывает готовность, а бизнес вручную подтверждает и публикует задачу. Студенты находят её в общем каталоге, отправляют предложения, после чего бизнес самостоятельно принимает или отклоняет каждое из них.
 
 ## Что работает
 
-- onboarding бизнеса и студента/фрилансера без полноценной авторизации;
+- серверная регистрация и вход для ролей Business и Student;
+- серверные профили и opaque-сессии в SQLite;
+- HttpOnly cookie без JWT или session token в `localStorage`;
 - реальный server-side OpenAI flow с настраиваемой моделью;
-- динамические AI-вопросы по отсутствующим сведениям;
-- проверяемый fallback с тем же контрактом;
+- динамические AI-вопросы и валидируемый fallback;
 - редактируемая карточка и обязательное подтверждение человеком;
-- детерминированный score 0–100, breakdown и рекомендации;
-- общий каталог, поиск, фильтры и сортировка по готовности;
-- неограниченные proposals с профилем команды;
-- ручные статусы `pending | accepted | rejected` без auto-assignment;
-- сохранение demo-state и незавершённой карточки после refresh;
-- история последнего изменения карточки и score delta.
+- детерминированный score 0–100 с breakdown и рекомендациями;
+- общий каталог, поиск, фильтры и сортировка;
+- student proposals и ручные решения бизнеса без auto-assignment;
+- сохранение demo-задач, откликов и незавершённой карточки после refresh.
+
+> Важная граница MVP: аккаунты, сессии и профили уже хранятся на сервере. Задачи, каталог и отклики пока остаются demo-данными в `localStorage` и не являются серверно-авторизованными. Их миграция в БД — отдельный следующий этап.
 
 ## Архитектура и стек
 
-Приложение намеренно не использует тяжёлый framework или внешние npm-зависимости.
-
 ```text
-Browser SPA (HTML/CSS/vanilla JS, ES modules)
-        │ POST /api/ai/analyze
-        ▼
-Node.js HTTP server
-        │ server-side OPENAI_API_KEY + OPENAI_MODEL
-        ▼
-OpenAI Responses API / validated local fallback
+Browser SPA (HTML/CSS/vanilla JS, hash routes)
+        │
+        ├── /api/auth/* + HttpOnly cookie
+        │           ▼
+        │     Node.js native http
+        │           ▼
+        │     SQLite / better-sqlite3
+        │     users + profiles + sessions
+        │
+        └── POST /api/ai/analyze
+                    ▼
+              OpenAI Responses API
+              validated local fallback
 
-Browser state → validated localStorage demo store
-Scoring     → deterministic application module
+Demo tasks / catalog / proposals → validated localStorage store
+Readiness score                 → deterministic application module
 ```
 
 - Frontend: HTML5, CSS, vanilla JavaScript, ES modules.
-- Backend: Node.js HTTP server без внешних packages.
-- AI: OpenAI Responses API, Structured Outputs JSON Schema.
-- Persistence: `localStorage` для hackathon demo.
-- Tests: встроенный `node:test`.
+- Backend: native `node:http`, без Express.
+- Database: SQLite через `better-sqlite3`.
+- Passwords: встроенный `crypto.scrypt` с уникальной солью.
+- Sessions: случайный 256-bit opaque token; в БД хранится только SHA-256 hash.
+- AI: OpenAI Responses API и Structured Outputs JSON Schema.
+- Tests: встроенный `node:test` и временные SQLite-БД.
 
-API-ключ используется только в [server-side AI service](src/services/ai-server.mjs). Браузерный JavaScript его не получает.
+## Быстрый запуск для жюри
 
-## Как жюри проверить проект из GitHub
-
-Репозиторий полностью самодостаточен для локальной проверки: жюри может клонировать его и запустить без установки npm-пакетов. Простого открытия страницы GitHub недостаточно — GitHub показывает исходный код, но не запускает Node.js backend.
-
-### Быстрый запуск без API-ключа
+Требуется Node.js 18+; рекомендуется Node.js 20 LTS.
 
 ```bash
 git clone https://github.com/BAITC-Hacks/hack-10d6f8ea-yola-team.git
 cd hack-10d6f8ea-yola-team
-node server.mjs
+npm install
+npm start
 ```
 
-После этого нужно открыть [http://localhost:4173](http://localhost:4173). Весь сквозной сценарий останется доступен, а AI-конструктор будет использовать локальный fallback с тем же контрактом данных.
+Откройте [http://localhost:4173](http://localhost:4173). Другой порт задаётся через `PORT`.
 
-### Проверка с реальным OpenAI API
-
-Для реального AI жюри должно использовать собственный API-ключ:
+Без `OPENAI_API_KEY` весь сквозной сценарий работает через локальный AI fallback. Для проверки реального OpenAI скопируйте конфигурацию:
 
 PowerShell:
 
@@ -73,91 +75,78 @@ Bash/zsh:
 cp .env.example .env
 ```
 
-Затем в локальном `.env` необходимо указать:
+Затем укажите собственный ключ в локальном `.env`:
 
 ```dotenv
 OPENAI_API_KEY=your-key
 OPENAI_MODEL=gpt-5.6-luna
 OPENAI_REASONING_EFFORT=medium
 OPENAI_TIMEOUT_MS=30000
+SESSION_TTL_MS=604800000
 ```
 
-После сохранения конфигурации запустите `node server.mjs`. Настоящий ключ намеренно отсутствует в GitHub: `.env` исключён через `.gitignore`, не копируется в production bundle и не передаётся во frontend.
+Файл `.env` исключён из Git, не входит в production bundle и не выдаётся static server. Настоящих API-ключей и demo-паролей в репозитории нет.
 
-GitHub Pages для этого проекта недостаточно, поскольку он не запускает серверный Node.js endpoint. Для проверки по одной публичной ссылке без клонирования потребуется Node.js-хостинг с `OPENAI_API_KEY` в server-side environment variables.
+## SQLite и production deployment
 
-## Требования и локальная установка
+Путь БД задаётся через `DATABASE_PATH`.
 
-- Node.js 18+ (рекомендуется Node.js 20+).
-- npm опционален: runtime-зависимостей нет, поэтому `npm install` не требуется.
+- Без переменной БД создаётся вне public static root, в соседней с проектом папке `.sana-hub-data/sana-hub.sqlite`.
+- Для production `DATABASE_PATH` обязан указывать на постоянный writable volume сервера.
+- SQLite-файл, `-wal` и `-shm` нельзя хранить в Git или в публичной static-директории.
+- При `NODE_ENV=production` session cookie автоматически получает атрибут `Secure`.
 
-```bash
-git clone https://github.com/BAITC-Hacks/hack-10d6f8ea-yola-team.git
-cd hack-10d6f8ea-yola-team
+Пример production-конфигурации:
+
+```dotenv
+NODE_ENV=production
+DATABASE_PATH=/var/lib/sana-hub/sana-hub.sqlite
+OPENAI_API_KEY=your-server-secret
+OPENAI_MODEL=gpt-5.6-luna
+OPENAI_REASONING_EFFORT=medium
+SESSION_TTL_MS=604800000
 ```
 
-Настройте backend environment variables. Реальный `.env` не коммитьте; пример находится в `.env.example`.
+GitHub Pages для проекта недостаточно: он не запускает Node.js backend и не может безопасно хранить API-ключ или SQLite. Для публичной ссылки нужен Node.js-хостинг с persistent volume и server-side environment variables.
 
-PowerShell:
+## Регистрация, вход и профиль
 
-```powershell
-$env:OPENAI_API_KEY="your-key"
-$env:OPENAI_MODEL="gpt-5.6-luna"
-$env:OPENAI_REASONING_EFFORT="medium"
-$env:OPENAI_TIMEOUT_MS="30000" # optional
-node server.mjs
-```
+1. Пользователь регистрируется через `#/register`, выбирая Business или Student.
+2. Backend нормализует email, проверяет пароль и сохраняет только scrypt hash и salt.
+3. Backend создаёт opaque session token, сохраняет только его SHA-256 hash и устанавливает HttpOnly cookie.
+4. SPA загружает сессию через `GET /api/auth/me`; роль интерфейса приходит только с сервера.
+5. Onboarding и редактирование профиля используют `PUT /api/auth/profile`.
+6. Выход отзывает серверную сессию и очищает cookie.
 
-Bash/zsh:
+Cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`; `Secure` включается в production. Пароль, salt, password hash и session token никогда не возвращаются в JSON. Истёкшие сессии удаляются и игнорируются.
 
-```bash
-export OPENAI_API_KEY="your-key"
-export OPENAI_MODEL="gpt-5.6-luna"
-export OPENAI_REASONING_EFFORT="medium"
-export OPENAI_TIMEOUT_MS="30000" # optional
-node server.mjs
-```
+### Auth API
 
-Откройте [http://localhost:4173](http://localhost:4173). Другой порт задаётся через `PORT`.
+| Метод | Endpoint | Назначение |
+| --- | --- | --- |
+| `POST` | `/api/auth/register` | Создать аккаунт и сессию |
+| `POST` | `/api/auth/login` | Войти и создать новую сессию |
+| `POST` | `/api/auth/logout` | Отозвать текущую сессию |
+| `GET` | `/api/auth/me` | Получить безопасного user с profile или `null` |
+| `PUT` | `/api/auth/profile` | Сохранить профиль согласно серверной роли |
 
-Для локального запуска эти же значения можно сохранить в файле `.env` в корне проекта. Файл исключён из Git и загружается только сервером. `OPENAI_MODEL` и `OPENAI_REASONING_EFFORT` не зашиты в бизнес-логику: модель и глубину рассуждения можно заменить без изменения AI-сервиса. Для OpenAI-compatible proxy можно дополнительно задать `OPENAI_BASE_URL`.
+Минимальная длина пароля — 8 символов. Повторный email возвращает `409`, неверные credentials — одинаковую безопасную ошибку `401`.
+
+### SQLite schema
+
+- `users`: `id`, нормализованный unique `email`, `password_hash`, `password_salt`, `role`, timestamps;
+- `profiles`: `user_id`, `name`, поля business/student onboarding, timestamp;
+- `sessions`: `id`, `user_id`, `token_hash`, `expires_at`, `created_at`.
 
 ## AI flow и безопасность фактов
 
-1. Browser отправляет краткое описание и текущее состояние карточки на `POST /api/ai/analyze`.
+1. Browser отправляет описание и текущее состояние карточки на `POST /api/ai/analyze`.
 2. Backend передаёт описание, карточку, предыдущие вопросы, ответы и обязательную схему в OpenAI.
-3. Ответ запрашивается как Structured Output и валидируется на backend.
-4. При наличии пробелов Browser показывает минимум три релевантных вопроса и редактируемый результат; для уже полной карточки список вопросов может быть пустым.
+3. Structured Output валидируется на backend.
+4. При наличии пробелов UI показывает минимум три релевантных вопроса и редактируемый результат.
 5. До ручного подтверждения карточка остаётся черновиком.
 
-AI разрешено использовать только факты пользователя. Запрещено придумывать бюджет, сроки, технологии, данные, контакты, пользователей, ограничения и критерии успеха. Неизвестные поля остаются пустыми или требуют уточнения.
-
-При отсутствии ключа, 401, 429, 5xx, timeout, network error, пустом ответе, неправильном JSON или malformed schema backend возвращает локальный fallback того же формата:
-
-```json
-{
-  "missingFields": [],
-  "questions": [],
-  "suggestedCard": {}
-}
-```
-
-UI остаётся рабочим и явно сообщает о fallback-режиме.
-
-## Модели
-
-`Task`:
-
-- `title`, `description`, `context`, `need`;
-- `users`, `data`, `constraints`;
-- `expectedResult`, `successCriteria`;
-- `businessContact`, `interactionFormat`;
-- `company`, `industry`, `topic`;
-- `score`, `readinessLevel`, `status`, `confirmed`.
-
-`Team`: `name`, `interests`, `skills`, `technologies`.
-
-`Proposal`: `taskId`, `teamId`, `solutionIdea`, `plan`, `duration`, `prototypeUrl`, `status`.
+AI использует только факты пользователя. Он не должен придумывать бюджет, сроки, технологии, данные, контакты, пользователей, ограничения или критерии успеха. При timeout, network/API error, пустом или malformed ответе backend возвращает fallback того же контракта, и UI продолжает работать.
 
 ## Формула готовности
 
@@ -172,24 +161,17 @@ UI остаётся рабочим и явно сообщает о fallback-ре
 | Связь с бизнесом | 10 |
 | Итого | 100 |
 
-Уровни:
+Уровни: 0–39 — Черновик; 40–69 — Рабочая; 70–89 — Готовая; 90–100 — Приоритетная. Пустые, неподтверждённые поля и «Требуется уточнение» не получают баллы.
 
-- 0–39 — Черновик;
-- 40–69 — Рабочая;
-- 70–89 — Готовая;
-- 90–100 — Приоритетная.
+## Каталог и предложения
 
-Пустые, неподтверждённые поля и «Требуется уточнение» не получают баллы. До подтверждения показывается прогноз. После подтверждённого редактирования score, уровень, breakdown и рекомендации пересчитываются.
-
-## Каталог и выбор команды
-
-- Все опубликованные задачи видимы, включая low-score cards.
+- Все опубликованные demo-задачи видимы, включая low-score cards.
 - По умолчанию задачи сортируются по score по убыванию.
 - Есть поиск и фильтры по теме и readiness level.
-- Количество proposals не ограничено.
-- Профиль студента автоматически подставляется в proposal.
+- Предложение может отправить только вошедший Student с заполненным профилем.
+- В demo-store создаётся производная команда `user-{id}` текущего student account.
 - AI никогда не выбирает и не назначает команду.
-- Бизнес может вручную принять одну, несколько или ни одной команды.
+- Business вручную принимает или отклоняет предложения.
 
 ## Demo data
 
@@ -197,94 +179,83 @@ UI остаётся рабочим и явно сообщает о fallback-ре
 
 - 5 слабых task drafts;
 - 5 подтверждённых опубликованных task cards;
-- 5 профилей команд;
+- 5 профилей demo-команд;
 - 5 proposals с разными статусами.
 
-Быстрые demo-профили:
-
-- Бизнес: Айдар, Astana Coffee, HoReCa, `aidar@example.com`.
-- Студент: Батыр, YOLO Team, навыки `Python, Web, AI`, технологии `React, FastAPI, Python`.
-
-Для возврата к seed data вызовите `resetSanaDemo()` в консоли браузера.
+Серверные user accounts и пароли не seed-ятся. Для демонстрации зарегистрируйте новые Business и Student аккаунты через UI. `resetSanaDemo()` сбрасывает только demo-store задач/команд/откликов и не изменяет серверные аккаунты или сессии.
 
 ## Demo script — до 5 минут
 
-| Время | Действие |
-| --- | --- |
-| 0:00–0:20 | Открыть landing и выбрать роль бизнеса. |
-| 0:20–0:40 | Сохранить быстрый профиль Айдара / Astana Coffee. |
-| 0:40–1:00 | Создать задачу: «В нашей сети кофеен бывают большие очереди. Хотим использовать AI, чтобы решить эту проблему». |
-| 1:00–1:25 | Показать AI-анализ и минимум три динамических вопроса. |
-| 1:25–2:00 | Указать данные, пользователей, результат, критерий успеха и ограничения. |
-| 2:00–2:25 | Показать editable card, breakdown и рост score после заполнения поля. |
-| 2:25–2:45 | Подтвердить карточку и показать её в каталоге. |
-| 2:45–3:10 | Переключиться на Батыр / YOLO Team и открыть задачу. |
-| 3:10–3:40 | Отправить idea, plan, срок и URL прототипа. |
-| 3:40–4:00 | Переключиться в бизнес и открыть proposals. |
-| 4:00–4:25 | Вручную принять или отклонить предложение и показать финальный статус. |
-| 4:25–4:45 | Подчеркнуть отсутствие auto-assignment и сохранение после refresh. |
-
-Резерв — 15 секунд. Если OpenAI недоступен, показать понятный fallback-state и продолжить тот же flow.
+1. Открыть приложение без сессии: в header видны «Регистрация» и «Вход».
+2. Зарегистрировать Business, заполнить профиль и создать короткую задачу.
+3. Показать AI-вопросы, карточку, рост score и публикацию.
+4. Выйти через профиль.
+5. Зарегистрировать Student, заполнить профиль и открыть каталог.
+6. Отправить proposal от производной команды текущего пользователя.
+7. Выйти, войти обратно как Business и вручную принять или отклонить proposal.
+8. Обновить страницу и показать сохранение server profile/session и demo-flow.
 
 ## Маршруты
 
 - `#/home` — landing;
-- `#/onboarding/business`, `#/onboarding/student` — demo onboarding;
-- `#/business/dashboard` — кабинет бизнеса;
-- `#/business/intake` — короткое описание и AI-вопросы;
-- `#/business/card` — редактор, score и подтверждение;
-- `#/catalog` — общий каталог;
-- `#/task/:id` — задача и proposal form;
-- `#/business/proposals` — ручное решение бизнеса;
-- `#/profile` — текущий demo-профиль.
+- `#/register`, `#/login` — регистрация и вход;
+- `#/onboarding/business`, `#/onboarding/student` — серверный профиль;
+- `#/profile` — профиль и logout;
+- `#/business/dashboard` — кабинет Business;
+- `#/business/intake`, `#/business/card` — AI-конструктор карточки;
+- `#/business/proposals` — ручное решение Business;
+- `#/catalog`, `#/task/:id` — общий каталог и задача.
 
-Hash routing позволяет безопасно обновлять эти маршруты без server-side 404.
+Unauthenticated пользователь перенаправляется с profile/onboarding/business routes на регистрацию или вход. Student не получает business UI, а Business не получает student proposal form.
 
 ## Проверки и production bundle
 
 ```bash
-node --test
-npm run lint
-npm run typecheck
+npm install
+npm run check
 npm run secret-scan
 npm run build
 ```
 
-Последняя финальная проверка: 30 тестов пройдено, production bundle собирается, secret scan не находит ключей в публикуемых файлах. Реальный endpoint проверен с `gpt-5.6-luna` и `medium` reasoning effort; при успешном ответе UI показывает источник `OpenAI API`, а не fallback.
+Текущий набор содержит 35 тестов: auth/database/session, AI, scoring, store, catalog, proposals и HTTP server. Auth-тесты используют отдельный временный `DATABASE_PATH` и не создают demo accounts в рабочей БД.
 
-`npm run build` создаёт автономную папку `dist/`. Её можно запустить так:
+`npm run build` создаёт папку `dist/` вместе с `package-lock.json`. Standalone bundle запускается так:
 
 ```bash
 cd dist
+npm install --omit=dev
 node server.mjs
 ```
 
-В проекте нет компилируемого TypeScript; `typecheck` выполняет синтаксическую проверку ключевых JS-модулей. `lint` также использует встроенный Node.js parser, поэтому чистая установка не загружает зависимости.
+Для production перед запуском обязательно подключите persistent writable volume и задайте абсолютный `DATABASE_PATH`.
 
 ## Структура проекта
 
 ```text
 .
-├── index.html                 # SPA entry
-├── server.mjs                 # static server + AI endpoint
+├── index.html
+├── server.mjs                    # static server + AI/auth API routes
 ├── src/
-│   ├── app.js                 # routes, UI and E2E orchestration
-│   ├── config/env.mjs         # server-only loading of local .env
-│   ├── data.js                # synthetic demo data
-│   ├── models.js              # Task, Team, Proposal factories/statuses
-│   ├── store.js               # validated local persistence
+│   ├── app.js                    # SPA routes, auth UI and MVP flow
+│   ├── store.js                  # demo task/proposal local persistence
+│   ├── config/env.mjs            # server-only .env loader
+│   ├── db/database.mjs           # SQLite path, schema and initialization
 │   └── services/
-│       ├── ai.js              # browser-safe validation/fallback
-│       ├── ai-server.mjs      # server-only OpenAI integration
-│       ├── scoring.js         # deterministic readiness score
-│       ├── marketplace.js     # catalog/proposal rules
-│       └── card-change.js     # last change and score delta
-├── tests/                     # AI, score, store, server and E2E-domain tests
-├── scripts/                   # build and secret scan
-├── *.css                      # shared feature styles
-└── .env.example              # secret-free configuration template
+│       ├── auth-crypto.mjs       # scrypt, opaque tokens and SHA-256
+│       ├── auth-service.mjs      # users, profiles and sessions
+│       ├── auth-http.mjs         # auth HTTP handlers and cookie policy
+│       ├── ai-server.mjs         # server-only OpenAI integration
+│       ├── ai.js                 # browser-safe fallback/validation
+│       ├── scoring.js
+│       ├── marketplace.js
+│       └── card-change.js
+├── tests/                        # isolated auth DB/API and MVP tests
+├── scripts/                      # build and secret scan
+├── package.json
+├── package-lock.json
+└── .env.example
 ```
 
 ## Out of scope
 
-Нет полноценной авторизации, чата, уведомлений, календаря, файлового хранилища, vector database, собственной ML-модели и production infrastructure. Это сознательно ограниченный, полностью демонстрируемый hackathon MVP.
+Нет OAuth, email verification, восстановления пароля, внешних auth providers, сложной RBAC, чата, уведомлений, календаря, файлового хранилища, vector database, собственной ML-модели или production project tracker. Перенос task/proposal данных из demo `localStorage` в серверную БД также остаётся следующим этапом.

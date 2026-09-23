@@ -7,7 +7,7 @@ const output = normalize(join(root, 'dist'));
 if (!output.startsWith(`${root}${sep}`) || output === root) throw new Error('Unsafe build output path');
 
 const files = [
-  'index.html', 'server.mjs', 'package.json', 'README.md', '.env.example',
+  'index.html', 'server.mjs', 'package.json', 'package-lock.json', 'README.md', '.env.example',
   'styles.css', 'question-states.css', 'onboarding.css', 'success.css', 'marketplace.css', 'card-change.css',
 ];
 

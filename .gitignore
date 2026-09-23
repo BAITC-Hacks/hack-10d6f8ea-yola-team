@@ -8,6 +8,15 @@ build/
 .env.*
 !.env.example
 
+# Local SQLite/auth data
+.sana-hub-data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
+
 # Logs, caches and local tooling
 *.log
 .cache/
