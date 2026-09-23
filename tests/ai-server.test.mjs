@@ -24,14 +24,16 @@ test('AI service validates success and falls back for API failures', async (t) =
     if (model === 'test-empty') response.end(JSON.stringify({ output_text: '' }));
     else if (model === 'test-malformed') response.end(JSON.stringify({ output_text: '{broken-json' }));
     else if (model === 'test-invalid-schema') response.end(JSON.stringify({ output_text: JSON.stringify({ missingFields: [], questions: [], suggestedCard: {} }) }));
+    else if (model === 'test-success') response.end(JSON.stringify({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(validResult) }] }] }));
     else response.end(JSON.stringify({ output_text: JSON.stringify(validResult) }));
   });
   await new Promise((resolve) => mock.listen(0, '127.0.0.1', resolve));
   t.after(() => mock.close());
   const port = mock.address().port;
-  const previous = { key: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL, url: process.env.OPENAI_BASE_URL, timeout: process.env.OPENAI_TIMEOUT_MS };
-  t.after(() => { process.env.OPENAI_API_KEY = previous.key; process.env.OPENAI_MODEL = previous.model; process.env.OPENAI_BASE_URL = previous.url; process.env.OPENAI_TIMEOUT_MS = previous.timeout; });
+  const previous = { key: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL, effort: process.env.OPENAI_REASONING_EFFORT, url: process.env.OPENAI_BASE_URL, timeout: process.env.OPENAI_TIMEOUT_MS };
+  t.after(() => { process.env.OPENAI_API_KEY = previous.key; process.env.OPENAI_MODEL = previous.model; process.env.OPENAI_REASONING_EFFORT = previous.effort; process.env.OPENAI_BASE_URL = previous.url; process.env.OPENAI_TIMEOUT_MS = previous.timeout; });
   process.env.OPENAI_API_KEY = 'test-key'; process.env.OPENAI_BASE_URL = `http://127.0.0.1:${port}/v1/responses`;
+  process.env.OPENAI_REASONING_EFFORT = 'medium';
 
   for (const model of ['test-success', 'test-401', 'test-429', 'test-500', 'test-malformed', 'test-empty', 'test-invalid-schema', 'test-timeout']) {
     process.env.OPENAI_MODEL = model; process.env.OPENAI_TIMEOUT_MS = model === 'test-timeout' ? '20' : '1000';

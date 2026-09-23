@@ -32,3 +32,10 @@ test('AI validation rejects malformed output and accepts the expected contract',
   assert.equal(valid.questions.length, 3);
   assert.equal(valid.suggestedCard.title, 'Задача');
 });
+
+test('AI validation allows no questions when every required field is complete', () => {
+  const completeCard = Object.fromEntries(CARD_FIELDS.map((field) => [field, `${field} value`]));
+  const valid = validateAIResult({ missingFields: [], questions: [], suggestedCard: completeCard });
+  assert.deepEqual(valid.missingFields, []);
+  assert.deepEqual(valid.questions, []);
+});

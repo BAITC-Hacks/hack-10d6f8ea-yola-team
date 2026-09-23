@@ -53,7 +53,7 @@ export function validateAIResult(value) {
   const suggestedCard = { ...emptyTask(), ...Object.fromEntries(CARD_FIELDS.map((field) => [field, ''])) };
   for (const field of CARD_FIELDS) { if (value.suggestedCard[field] !== undefined && value.suggestedCard[field] !== null && typeof value.suggestedCard[field] !== 'string') throw new Error(`AI field ${field} must be a string`); suggestedCard[field] = typeof value.suggestedCard[field] === 'string' ? value.suggestedCard[field].trim() : ''; }
   const questions = value.questions.filter((question) => question && typeof question.field === 'string' && CARD_FIELDS.includes(question.field) && typeof question.text === 'string' && question.text.trim()).slice(0, 6).map((question) => ({ field: question.field, text: question.text.trim() }));
-  if (questions.length < 3) throw new Error('AI must return at least 3 clarification questions');
-  const missingFields = [...new Set(value.missingFields.filter((field) => CARD_FIELDS.includes(field)))];
+  const missingFields = [...new Set([...value.missingFields.filter((field) => CARD_FIELDS.includes(field)), ...CARD_FIELDS.filter((field) => !suggestedCard[field])])];
+  if (missingFields.length > 0 && questions.length < 3) throw new Error('AI must return at least 3 clarification questions when fields are missing');
   return { missingFields, questions, suggestedCard, source: value.source || 'openai' };
 }

@@ -59,7 +59,8 @@ PowerShell:
 
 ```powershell
 $env:OPENAI_API_KEY="your-key"
-$env:OPENAI_MODEL="your-model-id"
+$env:OPENAI_MODEL="gpt-5.6-luna"
+$env:OPENAI_REASONING_EFFORT="medium"
 $env:OPENAI_TIMEOUT_MS="30000" # optional
 node server.mjs
 ```
@@ -68,14 +69,15 @@ Bash/zsh:
 
 ```bash
 export OPENAI_API_KEY="your-key"
-export OPENAI_MODEL="your-model-id"
+export OPENAI_MODEL="gpt-5.6-luna"
+export OPENAI_REASONING_EFFORT="medium"
 export OPENAI_TIMEOUT_MS="30000" # optional
 node server.mjs
 ```
 
 Откройте [http://localhost:4173](http://localhost:4173). Другой порт задаётся через `PORT`.
 
-`OPENAI_MODEL` не зашит в код: модель можно заменить без изменения бизнес-логики. Для OpenAI-compatible proxy можно дополнительно задать `OPENAI_BASE_URL`.
+Для локального запуска эти же значения можно сохранить в файле `.env` в корне проекта. Файл исключён из Git и загружается только сервером. `OPENAI_MODEL` и `OPENAI_REASONING_EFFORT` не зашиты в бизнес-логику: модель и глубину рассуждения можно заменить без изменения AI-сервиса. Для OpenAI-compatible proxy можно дополнительно задать `OPENAI_BASE_URL`.
 
 ## AI flow и безопасность фактов
 

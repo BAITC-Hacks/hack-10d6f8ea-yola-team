@@ -10,6 +10,7 @@ const findings = [];
 async function scan(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (excluded.has(entry.name)) continue;
+    if (entry.name === '.env' || (entry.name.startsWith('.env.') && entry.name !== '.env.example')) continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) { await scan(path); continue; }
     if (!readable.has(extname(entry.name)) && entry.name !== '.env.example') continue;
