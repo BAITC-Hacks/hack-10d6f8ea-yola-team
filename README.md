@@ -43,7 +43,50 @@ Scoring     → deterministic application module
 
 API-ключ используется только в [server-side AI service](src/services/ai-server.mjs). Браузерный JavaScript его не получает.
 
-## Требования и установка
+## Как жюри проверить проект из GitHub
+
+Репозиторий полностью самодостаточен для локальной проверки: жюри может клонировать его и запустить без установки npm-пакетов. Простого открытия страницы GitHub недостаточно — GitHub показывает исходный код, но не запускает Node.js backend.
+
+### Быстрый запуск без API-ключа
+
+```bash
+git clone https://github.com/BAITC-Hacks/hack-10d6f8ea-yola-team.git
+cd hack-10d6f8ea-yola-team
+node server.mjs
+```
+
+После этого нужно открыть [http://localhost:4173](http://localhost:4173). Весь сквозной сценарий останется доступен, а AI-конструктор будет использовать локальный fallback с тем же контрактом данных.
+
+### Проверка с реальным OpenAI API
+
+Для реального AI жюри должно использовать собственный API-ключ:
+
+PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Bash/zsh:
+
+```bash
+cp .env.example .env
+```
+
+Затем в локальном `.env` необходимо указать:
+
+```dotenv
+OPENAI_API_KEY=your-key
+OPENAI_MODEL=gpt-5.6-luna
+OPENAI_REASONING_EFFORT=medium
+OPENAI_TIMEOUT_MS=30000
+```
+
+После сохранения конфигурации запустите `node server.mjs`. Настоящий ключ намеренно отсутствует в GitHub: `.env` исключён через `.gitignore`, не копируется в production bundle и не передаётся во frontend.
+
+GitHub Pages для этого проекта недостаточно, поскольку он не запускает серверный Node.js endpoint. Для проверки по одной публичной ссылке без клонирования потребуется Node.js-хостинг с `OPENAI_API_KEY` в server-side environment variables.
+
+## Требования и локальная установка
 
 - Node.js 18+ (рекомендуется Node.js 20+).
 - npm опционален: runtime-зависимостей нет, поэтому `npm install` не требуется.
@@ -84,7 +127,7 @@ node server.mjs
 1. Browser отправляет краткое описание и текущее состояние карточки на `POST /api/ai/analyze`.
 2. Backend передаёт описание, карточку, предыдущие вопросы, ответы и обязательную схему в OpenAI.
 3. Ответ запрашивается как Structured Output и валидируется на backend.
-4. Browser показывает минимум три релевантных вопроса и редактируемый результат.
+4. При наличии пробелов Browser показывает минимум три релевантных вопроса и редактируемый результат; для уже полной карточки список вопросов может быть пустым.
 5. До ручного подтверждения карточка остаётся черновиком.
 
 AI разрешено использовать только факты пользователя. Запрещено придумывать бюджет, сроки, технологии, данные, контакты, пользователей, ограничения и критерии успеха. Неизвестные поля остаются пустыми или требуют уточнения.
@@ -207,6 +250,8 @@ npm run secret-scan
 npm run build
 ```
 
+Последняя финальная проверка: 30 тестов пройдено, production bundle собирается, secret scan не находит ключей в публикуемых файлах. Реальный endpoint проверен с `gpt-5.6-luna` и `medium` reasoning effort; при успешном ответе UI показывает источник `OpenAI API`, а не fallback.
+
 `npm run build` создаёт автономную папку `dist/`. Её можно запустить так:
 
 ```bash
@@ -224,6 +269,7 @@ node server.mjs
 ├── server.mjs                 # static server + AI endpoint
 ├── src/
 │   ├── app.js                 # routes, UI and E2E orchestration
+│   ├── config/env.mjs         # server-only loading of local .env
 │   ├── data.js                # synthetic demo data
 │   ├── models.js              # Task, Team, Proposal factories/statuses
 │   ├── store.js               # validated local persistence
