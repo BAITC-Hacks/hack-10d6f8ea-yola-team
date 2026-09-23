@@ -5,6 +5,6 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test",
-    "check": "node --check server.mjs && node --check src/app.js && node --check src/services/scoring.js && node --check src/services/marketplace.js"
+    "check": "node --check server.mjs && node --check src/app.js && node --check src/store.js && node --check src/services/ai-server.mjs && node --check src/services/scoring.js && node --check src/services/marketplace.js && node --check src/services/card-change.js"
   }
 }

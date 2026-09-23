@@ -40,4 +40,10 @@ test('AI service validates success and falls back for API failures', async (t) =
     if (model === 'test-success') { assert.equal(result.source, 'openai'); assert.equal(result.questions.length, 3); }
     else { assert.equal(result.source, 'fallback'); assert.ok(result.questions.length >= 3); assert.match(result.warning, /fallback/i); }
   }
+
+  process.env.OPENAI_MODEL = 'test-network-error'; process.env.OPENAI_BASE_URL = 'http://127.0.0.1:1/v1/responses'; process.env.OPENAI_TIMEOUT_MS = '100';
+  const networkService = await import('../src/services/ai-server.mjs?case=test-network-error');
+  const networkResult = await networkService.analyzeTask({ description: 'Нужен AI для магазина.', currentCard: {} });
+  assert.equal(networkResult.source, 'fallback');
+  assert.match(networkResult.warning, /fallback/i);
 });

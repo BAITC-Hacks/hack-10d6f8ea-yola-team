@@ -24,6 +24,7 @@ test('catalog filters by readiness and searches keywords', () => {
 
 test('proposal validation rejects invalid URL', () => {
   const errors = validateProposalInput({ teamId: 'team-1', solutionIdea: 'Идея', plan: 'План', duration: '2 недели', prototypeUrl: 'abc' });
+  assert.match(errors.taskId, /недоступна/);
   assert.match(errors.prototypeUrl, /корректную ссылку/);
 });
 

@@ -6,13 +6,14 @@ import { levelLabel, previewTaskScore, scoreTask } from './services/scoring.js';
 import { loadStore, resetStore, saveStore } from './store.js';
 
 let store = loadStore();
-let draft = emptyTask('draft-current');
-let analysis = null;
+let draft = store.workflow?.draft ? { ...store.workflow.draft } : emptyTask('draft-current');
+let analysis = store.workflow?.analysis ? structuredClone(store.workflow.analysis) : null;
 let role = store.currentRole || 'business';
 let aiState = 'idle';
 let aiError = '';
 let flashMessage = '';
-let lastSavedCard = null;
+let lastSavedCard = store.workflow?.lastSavedCard ? { ...store.workflow.lastSavedCard } : store.workflow?.draft ? { ...store.workflow.draft } : null;
+let persistenceError = '';
 
 const app = document.querySelector('#app');
 const route = () => window.location.hash.replace(/^#\/?/, '') || 'home';
@@ -23,6 +24,18 @@ const taskById = (id) => store.tasks.find((task) => task.id === id);
 const teamById = (id) => store.teams.find((team) => team.id === id);
 const activeStudentTeam = () => store.teams.find((team) => team.id === 'profile-student') || store.teams[0];
 const currentDraftCard = () => ({ ...draft, ...(analysis?.suggestedCard || {}) });
+function persistStore() {
+  const saved = saveStore(store);
+  persistenceError = saved ? '' : 'Не удалось сохранить данные в браузере. Освободите место и повторите действие.';
+  return saved;
+}
+function persistWorkflow() {
+  store.workflow = { draft: currentDraftCard(), analysis, lastSavedCard };
+  return persistStore();
+}
+function clearWorkflow() {
+  store.workflow = null;
+}
 function saveCardChange(card) {
   const change = lastSavedCard ? createLastCardChange(lastSavedCard, card) : null;
   const savedCard = change ? { ...card, lastChange: change } : card;
@@ -136,28 +149,162 @@ function renderProposals() {
   return page('Предложения команд', 'Сравните идеи и примите решение вручную. Sana не назначает команды автоматически.', `<div class="proposal-list">${rows || '<div class="panel empty-state"><div class="spark">✦</div><h2>Предложений пока нет</h2><p class="muted">Когда студенты или фрилансеры откликнутся на опубликованную задачу, предложения появятся здесь.</p><a class="text-link" href="#/catalog">Открыть каталог →</a></div>'}</div>`);
 }
 
-function render() { const current = route(); if (current === 'home') app.innerHTML = renderHome(); else if (current.startsWith('onboarding/')) app.innerHTML = renderOnboarding(current.split('/')[1] === 'business' ? 'business' : 'student'); else if (current === 'business/dashboard') app.innerHTML = renderBusinessDashboard(); else if (current === 'profile') app.innerHTML = renderProfile(); else if (current === 'catalog') app.innerHTML = renderCatalog(); else if (current.startsWith('task/')) app.innerHTML = renderTask(current.split('/')[1]); else if (current === 'business/card') app.innerHTML = renderCard(); else if (current === 'business/proposals') app.innerHTML = renderProposals(); else app.innerHTML = renderIntake(); if (flashMessage) { app.querySelector('main')?.insertAdjacentHTML('afterbegin', `<div class="success-box">✓ ${esc(flashMessage)}</div>`); flashMessage = ''; } bindEvents(); }
+function render() { const current = route(); if (current === 'home') app.innerHTML = renderHome(); else if (current.startsWith('onboarding/')) app.innerHTML = renderOnboarding(current.split('/')[1] === 'business' ? 'business' : 'student'); else if (current === 'business/dashboard') app.innerHTML = renderBusinessDashboard(); else if (current === 'profile') app.innerHTML = renderProfile(); else if (current === 'catalog') app.innerHTML = renderCatalog(); else if (current.startsWith('task/')) app.innerHTML = renderTask(current.split('/')[1]); else if (current === 'business/card') app.innerHTML = renderCard(); else if (current === 'business/proposals') app.innerHTML = renderProposals(); else app.innerHTML = renderIntake(); if (persistenceError) app.querySelector('main')?.insertAdjacentHTML('afterbegin', `<div class="error-box global-error">${esc(persistenceError)}</div>`); if (flashMessage) { app.querySelector('main')?.insertAdjacentHTML('afterbegin', `<div class="success-box">✓ ${esc(flashMessage)}</div>`); flashMessage = ''; } bindEvents(); }
 function bindEvents() {
-  document.querySelectorAll('[data-role]').forEach((button) => button.addEventListener('click', () => { role = button.dataset.role; store.currentRole = role; saveStore(store); navigate(store.profiles?.[role] ? (role === 'business' ? 'business/dashboard' : 'catalog') : `onboarding/${role}`); }));
-  document.querySelectorAll('a[href="#/business/intake"]').forEach((link) => link.addEventListener('click', () => { if (route() === 'business/dashboard') { const profile = store.profiles?.business; draft = emptyTask('draft-current'); if (profile) { draft.businessContact = `${profile.name}, ${profile.contact}`; draft.interactionFormat = profile.interactionFormat; draft.company = profile.company; draft.industry = profile.industry; } analysis = null; aiError = ''; aiState = 'idle'; lastSavedCard = null; } }));
-  document.querySelector('#onboarding-form')?.addEventListener('submit', (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const type = event.currentTarget.dataset.profileType; const profile = Object.fromEntries([...form.entries()].map(([key, value]) => [key, String(value).trim()])); if (!event.currentTarget.checkValidity()) { document.querySelector('#onboarding-error').hidden = false; return; } store.profiles ||= { business: null, student: null }; store.profiles[type] = profile; store.currentRole = type; role = type; if (type === 'student') { const team = { id: 'profile-student', name: profile.team || profile.name, interests: profile.interests, skills: profile.skills, technologies: profile.technologies, portfolio: profile.portfolio }; store.teams = [team, ...store.teams.filter((item) => item.id !== team.id)]; } else { draft.businessContact ||= `${profile.name}, ${profile.contact}`; draft.interactionFormat ||= profile.interactionFormat; draft.company ||= profile.company; draft.industry ||= profile.industry; } saveStore(store); navigate(type === 'business' ? 'business/dashboard' : 'catalog'); });
-  document.querySelector('[data-action="analyze"]')?.addEventListener('click', async () => { const value = document.querySelector('#draft-input').value.trim(); if (!value) { aiError = 'Сначала опишите задачу.'; render(); return; } aiError = ''; lastSavedCard = null; aiState = 'loading'; render(); try { draft = { ...draft, description: value }; analysis = await requestAI({ description: value, currentCard: draft }); analysis.answers = {}; draft = { ...draft, ...analysis.suggestedCard }; aiState = 'idle'; render(); } catch { aiState = 'idle'; aiError = 'AI-сервис недоступен. Проверьте сервер или попробуйте fallback ещё раз.'; analysis = fallbackAnalyzeTask({ description: value, currentCard: draft }); analysis.answers = {}; draft = { ...draft, ...analysis.suggestedCard }; render(); } });
+  document.querySelectorAll('[data-role]').forEach((button) => button.addEventListener('click', () => {
+    role = button.dataset.role;
+    store.currentRole = role;
+    persistStore();
+    navigate(store.profiles?.[role] ? (role === 'business' ? 'business/dashboard' : 'catalog') : `onboarding/${role}`);
+  }));
+  document.querySelectorAll('a[href="#/business/intake"]').forEach((link) => link.addEventListener('click', () => {
+    if (route() !== 'business/dashboard') return;
+    const profile = store.profiles?.business;
+    draft = emptyTask('draft-current');
+    if (profile) {
+      draft.businessContact = `${profile.name}, ${profile.contact}`;
+      draft.interactionFormat = profile.interactionFormat;
+      draft.company = profile.company;
+      draft.industry = profile.industry;
+    }
+    analysis = null;
+    aiError = '';
+    aiState = 'idle';
+    lastSavedCard = null;
+    persistWorkflow();
+  }));
+  document.querySelector('#onboarding-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const type = event.currentTarget.dataset.profileType;
+    const profile = Object.fromEntries([...form.entries()].map(([key, value]) => [key, String(value).trim()]));
+    if (!event.currentTarget.checkValidity()) { document.querySelector('#onboarding-error').hidden = false; return; }
+    store.profiles ||= { business: null, student: null };
+    store.profiles[type] = profile;
+    store.currentRole = type;
+    role = type;
+    if (type === 'student') {
+      const team = { id: 'profile-student', name: profile.team || profile.name, interests: profile.interests, skills: profile.skills, technologies: profile.technologies, portfolio: profile.portfolio };
+      store.teams = [team, ...store.teams.filter((item) => item.id !== team.id)];
+    } else {
+      draft.businessContact ||= `${profile.name}, ${profile.contact}`;
+      draft.interactionFormat ||= profile.interactionFormat;
+      draft.company ||= profile.company;
+      draft.industry ||= profile.industry;
+    }
+    if (!persistStore()) { render(); return; }
+    navigate(type === 'business' ? 'business/dashboard' : 'catalog');
+  });
+  document.querySelector('[data-action="analyze"]')?.addEventListener('click', async () => {
+    if (aiState === 'loading') return;
+    const value = document.querySelector('#draft-input').value.trim();
+    if (!value) { aiError = 'Сначала опишите задачу.'; render(); return; }
+    aiError = '';
+    lastSavedCard = null;
+    draft = { ...draft, description: value };
+    aiState = 'loading';
+    persistWorkflow();
+    render();
+    try {
+      analysis = await requestAI({ description: value, currentCard: draft });
+      analysis.answers = {};
+      draft = { ...draft, ...analysis.suggestedCard };
+    } catch {
+      aiError = 'AI-сервис недоступен. Использован локальный fallback; данные можно продолжить редактировать.';
+      analysis = fallbackAnalyzeTask({ description: value, currentCard: draft });
+      analysis.answers = {};
+      draft = { ...draft, ...analysis.suggestedCard };
+    } finally {
+      aiState = 'idle';
+      persistWorkflow();
+      render();
+    }
+  });
   document.querySelector('[data-action="retry-ai"]')?.addEventListener('click', () => document.querySelector('[data-action="analyze"]')?.click());
-  document.querySelector('[data-action="form-card"]')?.addEventListener('click', async () => { const answers = {}; document.querySelectorAll('[data-question]').forEach((input) => { answers[input.dataset.question] = input.value.trim(); }); analysis.answers = answers; aiState = 'loading'; render(); try { const result = await requestAI({ description: draft.description, currentCard: analysis.suggestedCard, previousQuestions: analysis.questions, answers }); analysis = { ...result, answers }; draft = { ...draft, ...result.suggestedCard }; lastSavedCard = { ...currentDraftCard() }; aiState = 'idle'; navigate('business/card'); } catch { aiState = 'idle'; analysis = { ...fallbackAnalyzeTask({ description: draft.description, currentCard: analysis.suggestedCard, answers }), answers }; draft = { ...draft, ...analysis.suggestedCard }; lastSavedCard = { ...currentDraftCard() }; aiError = 'OpenAI API недоступен, поэтому применён локальный fallback.'; navigate('business/card'); } });
+  document.querySelector('[data-action="form-card"]')?.addEventListener('click', async () => {
+    if (aiState === 'loading') return;
+    const answers = {};
+    document.querySelectorAll('[data-question]').forEach((input) => { answers[input.dataset.question] = input.value.trim(); });
+    analysis.answers = answers;
+    aiState = 'loading';
+    persistWorkflow();
+    render();
+    try {
+      const result = await requestAI({ description: draft.description, currentCard: analysis.suggestedCard, previousQuestions: analysis.questions, answers });
+      analysis = { ...result, answers };
+      draft = { ...draft, ...result.suggestedCard };
+    } catch {
+      analysis = { ...fallbackAnalyzeTask({ description: draft.description, currentCard: analysis.suggestedCard, answers }), answers };
+      draft = { ...draft, ...analysis.suggestedCard };
+      aiError = 'OpenAI API недоступен, поэтому применён локальный fallback.';
+    } finally {
+      lastSavedCard = { ...currentDraftCard() };
+      aiState = 'idle';
+      persistWorkflow();
+      navigate('business/card');
+    }
+  });
   document.querySelector('[data-action="back-intake"]')?.addEventListener('click', () => navigate('business/intake'));
-  document.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('input', () => { if (analysis) analysis.suggestedCard[input.dataset.field] = input.value; else draft[input.dataset.field] = input.value; renderCardLive(); }));
-  document.querySelector('[data-action="save-card"]')?.addEventListener('click', () => { saveCardChange(currentDraftCard()); alert('Изменения сохранены. Рейтинг обновлён.'); render(); });
-  document.querySelector('[data-action="publish"]')?.addEventListener('click', () => { const candidate = currentDraftCard(); if (!candidate.title || !candidate.need) { aiError = 'Заполните название и потребность.'; render(); return; } const savedCard = saveCardChange(candidate); const card = { ...savedCard, confirmed: true }; const scored = scoreTask(card); const published = { ...card, ...scored, status: TASK_STATUS.PUBLISHED, topic: card.topic || 'Другое' }; store.tasks = [published, ...store.tasks.filter((task) => task.id !== published.id)]; saveStore(store); flashMessage = 'Карточка подтверждена, рейтинг пересчитан и задача опубликована.'; navigate('catalog'); });
-  document.querySelector('[data-action="edit-task"]')?.addEventListener('click', (event) => { const task = taskById(event.currentTarget.dataset.taskId); if (!task) return; draft = { ...task, confirmed: false }; analysis = { suggestedCard: draft, questions: [], missingFields: [], answers: {}, source: 'manual' }; lastSavedCard = { ...task }; navigate('business/card'); });
+  document.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('input', () => { if (analysis) analysis.suggestedCard[input.dataset.field] = input.value; else draft[input.dataset.field] = input.value; persistWorkflow(); renderCardLive(); }));
+  document.querySelector('[data-action="save-card"]')?.addEventListener('click', () => { saveCardChange(currentDraftCard()); persistWorkflow(); flashMessage = 'Изменения сохранены. Рейтинг и история обновлены.'; render(); });
+  document.querySelector('[data-action="publish"]')?.addEventListener('click', () => {
+    const candidate = currentDraftCard();
+    if (!candidate.title?.trim() || !candidate.need?.trim()) { aiError = 'Заполните название и потребность.'; render(); return; }
+    const savedCard = saveCardChange(candidate);
+    const card = { ...savedCard, confirmed: true };
+    const scored = scoreTask(card);
+    const published = { ...card, ...scored, status: TASK_STATUS.PUBLISHED, topic: card.topic || 'Другое' };
+    store.tasks = [published, ...store.tasks.filter((task) => task.id !== published.id)];
+    clearWorkflow();
+    if (!persistStore()) { render(); return; }
+    flashMessage = 'Карточка подтверждена, рейтинг пересчитан и задача опубликована.';
+    navigate('catalog');
+  });
+  document.querySelector('[data-action="edit-task"]')?.addEventListener('click', (event) => {
+    const task = taskById(event.currentTarget.dataset.taskId);
+    if (!task) return;
+    draft = { ...task, confirmed: false };
+    analysis = { suggestedCard: draft, questions: [], missingFields: [], answers: {}, source: 'manual' };
+    lastSavedCard = { ...task };
+    persistWorkflow();
+    navigate('business/card');
+  });
   document.querySelector('[data-action="focus-proposal"]')?.addEventListener('click', () => document.querySelector('#proposal-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  document.querySelector('#proposal-form')?.addEventListener('submit', (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const result = createProposal({ taskId: event.currentTarget.dataset.taskId, teamId: form.get('teamId'), solutionIdea: form.get('solutionIdea'), plan: form.get('plan'), duration: form.get('duration'), prototypeUrl: form.get('prototypeUrl') }); const errorBox = document.querySelector('#proposal-error'); if (result.proposal) { store.proposals.unshift(result.proposal); saveStore(store); flashMessage = 'Предложение отправлено бизнесу и сохранено.'; render(); return; } errorBox.textContent = Object.values(result.errors).join(' · '); errorBox.hidden = false; });
-  document.querySelectorAll('[data-action="accept"], [data-action="reject"]').forEach((button) => button.addEventListener('click', () => { const proposal = store.proposals.find((item) => item.id === button.dataset.proposalId); const decision = button.dataset.action === 'accept' ? 'accepted' : 'rejected'; if (!decideProposal(proposal, decision)) return; saveStore(store); flashMessage = decision === 'accepted' ? 'Предложение принято вручную.' : 'Предложение отклонено вручную.'; render(); }));
+  document.querySelector('#proposal-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const proposalForm = event.currentTarget;
+    if (proposalForm.dataset.submitting === 'true') return;
+    proposalForm.dataset.submitting = 'true';
+    const submitButton = proposalForm.querySelector('button[type="submit"]');
+    if (submitButton) { submitButton.disabled = true; submitButton.textContent = 'Отправляем…'; }
+    const form = new FormData(proposalForm);
+    const taskId = proposalForm.dataset.taskId;
+    const teamId = String(form.get('teamId') || '');
+    const errorBox = document.querySelector('#proposal-error');
+    const release = () => { proposalForm.dataset.submitting = 'false'; if (submitButton) { submitButton.disabled = false; submitButton.textContent = 'Отправить предложение →'; } };
+    if (!taskById(taskId) || !teamById(teamId)) { errorBox.textContent = 'Задача или профиль команды больше недоступны. Обновите страницу.'; errorBox.hidden = false; release(); return; }
+    const result = createProposal({ taskId, teamId, solutionIdea: form.get('solutionIdea'), plan: form.get('plan'), duration: form.get('duration'), prototypeUrl: form.get('prototypeUrl') });
+    if (!result.proposal) { errorBox.textContent = Object.values(result.errors).join(' · '); errorBox.hidden = false; release(); return; }
+    store.proposals.unshift(result.proposal);
+    if (!persistStore()) { store.proposals.shift(); errorBox.textContent = persistenceError; errorBox.hidden = false; release(); return; }
+    flashMessage = 'Предложение отправлено бизнесу и сохранено.';
+    render();
+  });
+  document.querySelectorAll('[data-action="accept"], [data-action="reject"]').forEach((button) => button.addEventListener('click', () => {
+    const proposal = store.proposals.find((item) => item.id === button.dataset.proposalId);
+    const decision = button.dataset.action === 'accept' ? 'accepted' : 'rejected';
+    const previous = proposal?.status;
+    if (!decideProposal(proposal, decision)) return;
+    if (!persistStore()) { proposal.status = previous; render(); return; }
+    flashMessage = decision === 'accepted' ? 'Предложение принято вручную.' : 'Предложение отклонено вручную.';
+    render();
+  }));
   document.querySelector('#catalog-search')?.addEventListener('input', filterCatalog); document.querySelector('#topic-filter')?.addEventListener('change', filterCatalog); document.querySelector('#level-filter')?.addEventListener('change', filterCatalog);
 }
 function renderCardLive() { const existing = document.querySelector('[data-score-content]'); if (!existing) return; const card = currentDraftCard(); const scored = previewTaskScore(card); existing.innerHTML = scorePanelContent(scored, card.lastChange); }
 function filterCatalog() { const topic = document.querySelector('#topic-filter')?.value || 'all'; const level = document.querySelector('#level-filter')?.value || 'all'; const query = document.querySelector('#catalog-search')?.value || ''; const tasks = selectCatalogTasks(store.tasks, { topic, level, query }); document.querySelector('#catalog-grid').innerHTML = catalogResults(tasks); const count = document.querySelector('#catalog-count'); if (count) count.textContent = `${tasks.length} задач`; }
 
 window.addEventListener('hashchange', render);
-window.addEventListener('storage', () => { store = loadStore(); render(); });
-window.resetSanaDemo = () => { store = resetStore(); analysis = null; draft = emptyTask('draft-current'); lastSavedCard = null; render(); };
+window.addEventListener('storage', () => { store = loadStore(); role = store.currentRole || role; draft = store.workflow?.draft ? { ...store.workflow.draft } : draft; analysis = store.workflow?.analysis ? structuredClone(store.workflow.analysis) : analysis; lastSavedCard = store.workflow?.lastSavedCard ? { ...store.workflow.lastSavedCard } : lastSavedCard; render(); });
+window.resetSanaDemo = () => { store = resetStore(); analysis = null; draft = emptyTask('draft-current'); lastSavedCard = null; persistenceError = ''; render(); };
 render();

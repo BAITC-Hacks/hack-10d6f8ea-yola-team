@@ -15,8 +15,16 @@ export function selectCatalogTasks(tasks = [], filters = {}) {
 
 export function validateProposalInput(input = {}) {
   const errors = {};
-  for (const field of ['teamId', 'solutionIdea', 'plan', 'duration', 'prototypeUrl']) {
-    if (!String(input[field] || '').trim()) errors[field] = 'Обязательное поле';
+  const required = {
+    taskId: 'Задача недоступна',
+    teamId: 'Профиль команды не найден',
+    solutionIdea: 'Опишите идею решения',
+    plan: 'Добавьте план реализации',
+    duration: 'Укажите ожидаемый срок',
+    prototypeUrl: 'Добавьте ссылку на прототип',
+  };
+  for (const [field, message] of Object.entries(required)) {
+    if (!String(input[field] || '').trim()) errors[field] = message;
   }
   if (input.prototypeUrl) {
     try {
