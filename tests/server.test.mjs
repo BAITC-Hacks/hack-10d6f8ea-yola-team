@@ -14,8 +14,12 @@ test('server returns stable 404, 405 and malformed JSON errors', async (t) => {
   assert.deepEqual(await wrongMethod.json(), { error: 'Method not allowed' });
 
   const malformed = await fetch(`${base}/api/ai/analyze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{broken' });
-  assert.equal(malformed.status, 400);
-  assert.deepEqual(await malformed.json(), { error: 'Malformed JSON payload' });
+  assert.equal(malformed.status, 401);
+  assert.deepEqual(await malformed.json(), { error: 'Требуется вход в аккаунт.' });
+
+  const malformedPublic = await fetch(`${base}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{broken' });
+  assert.equal(malformedPublic.status, 400);
+  assert.deepEqual(await malformedPublic.json(), { error: 'Malformed JSON payload' });
 
   const secret = await fetch(`${base}/.env`);
   assert.equal(secret.status, 404);

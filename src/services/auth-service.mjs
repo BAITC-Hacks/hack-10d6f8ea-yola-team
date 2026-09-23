@@ -6,6 +6,7 @@ const ROLES = new Set(['business', 'student']);
 const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DUMMY_SALT = 'invalid-user-salt';
 const DUMMY_HASH = Buffer.alloc(64).toString('base64url');
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 export class AuthError extends Error {
   constructor(status, message) {
@@ -102,6 +103,7 @@ export function createAuthService({ db, now = () => Date.now(), sessionTtlMs = N
   }
 
   async function register(input = {}) {
+    if (!isRecord(input)) throw new AuthError(400, 'JSON payload должен быть объектом.');
     const email = normalizeEmail(input.email);
     const password = typeof input.password === 'string' ? input.password : '';
     const role = input.role;
@@ -122,6 +124,7 @@ export function createAuthService({ db, now = () => Date.now(), sessionTtlMs = N
   }
 
   async function login(input = {}) {
+    if (!isRecord(input)) throw new AuthError(400, 'JSON payload должен быть объектом.');
     const email = normalizeEmail(input.email);
     const password = typeof input.password === 'string' ? input.password : '';
     const row = findUserByEmail.get(email);
@@ -154,6 +157,7 @@ export function createAuthService({ db, now = () => Date.now(), sessionTtlMs = N
   function updateProfile(token, input) {
     const user = userForToken(token);
     if (!user) throw new AuthError(401, 'Требуется вход в аккаунт.');
+    if (!isRecord(input)) throw new AuthError(400, 'JSON payload должен быть объектом.');
     const profile = validateProfile(user.role, input);
     const updatedAt = new Date(now()).toISOString();
     const save = db.transaction(() => {

@@ -2,7 +2,7 @@ import { AuthError } from './auth-service.mjs';
 
 export const SESSION_COOKIE = 'sana_session';
 
-function sessionToken(request) {
+export function sessionToken(request) {
   const cookies = String(request.headers.cookie || '').split(';');
   for (const cookie of cookies) {
     const separator = cookie.indexOf('=');

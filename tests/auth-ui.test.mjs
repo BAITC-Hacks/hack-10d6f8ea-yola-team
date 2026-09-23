@@ -4,11 +4,13 @@ import test from 'node:test';
 
 test('frontend role comes from server auth without the legacy role switch', async () => {
   const source = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  const apiSource = await readFile(new URL('../src/api.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /role-switch/);
   assert.doesNotMatch(source, /data-role/);
   assert.doesNotMatch(source, /store\.currentRole/);
-  assert.match(source, /\/api\/auth\/me/);
-  assert.match(source, /\/api\/auth\/register/);
-  assert.match(source, /\/api\/auth\/login/);
-  assert.match(source, /user-\$\{auth\.user\.id\}/);
+  assert.match(apiSource, /\/api\/auth\/me/);
+  assert.match(apiSource, /\/api\/auth\/register/);
+  assert.match(apiSource, /\/api\/auth\/login/);
+  assert.doesNotMatch(source, /user-\$\{auth\.user\.id\}/);
+  assert.match(apiSource, /\/api\/me\/tasks/);
 });
